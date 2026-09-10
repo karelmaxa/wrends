@@ -22,7 +22,10 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.security.KeyStoreException;
 import java.security.cert.Certificate;
+import java.security.cert.X509Certificate;
 import java.util.Arrays;
+import java.util.Collection;
+import java.util.List;
 
 import org.testng.annotations.BeforeClass;
 import org.testng.annotations.DataProvider;
@@ -615,7 +618,7 @@ public class CertificateManagerTestCase
 
     try
     {
-      certManager.generateSelfSignedCertificate(keyType, null, "CN=Test,O=test", 365);
+      certManager.generateSelfSignedCertificate(keyType, null, "CN=Test,O=test", null, 365);
       fail("Expected an NPE due to a null alias");
     } catch (NullPointerException npe) {}
   }
@@ -642,7 +645,7 @@ public class CertificateManagerTestCase
 
     try
     {
-      certManager.generateSelfSignedCertificate(keyType, "", "CN=Test,O=test", 365);
+      certManager.generateSelfSignedCertificate(keyType, "", "CN=Test,O=test", null, 365);
       fail("Expected an NPE due to an empty alias");
     } catch (NullPointerException npe) {}
   }
@@ -669,7 +672,7 @@ public class CertificateManagerTestCase
 
     try
     {
-      certManager.generateSelfSignedCertificate(keyType, "server-cert", "CN=Test,O=test",
+      certManager.generateSelfSignedCertificate(keyType, "server-cert", "CN=Test,O=test", null,
                                                 365);
       fail("Expected an illegal argument exception to a duplicate alias");
     } catch (IllegalArgumentException iae) {}
@@ -697,7 +700,7 @@ public class CertificateManagerTestCase
 
     try
     {
-      certManager.generateSelfSignedCertificate(keyType, "test-cert", null, 365);
+      certManager.generateSelfSignedCertificate(keyType, "test-cert", null, null, 365);
       fail("Expected an NPE due to a null subject");
     } catch (NullPointerException npe) {}
   }
@@ -724,7 +727,7 @@ public class CertificateManagerTestCase
 
     try
     {
-      certManager.generateSelfSignedCertificate(keyType, "test-cert", "", 365);
+      certManager.generateSelfSignedCertificate(keyType, "test-cert", "", null, 365);
       fail("Expected an NPE due to an empty subject");
     } catch (NullPointerException npe) {}
   }
@@ -755,7 +758,7 @@ public class CertificateManagerTestCase
          new CertificateManager(path.getAbsolutePath(), "JKS", "password");
     try
     {
-      certManager.generateSelfSignedCertificate(keyType, "test-cert", "invalid", 365);
+      certManager.generateSelfSignedCertificate(keyType, "test-cert", "invalid", null, 365);
       fail("Expected a key store exception due to an invalid subject");
     } catch (KeyStoreException cse) {}
     path.delete();
@@ -783,7 +786,7 @@ public class CertificateManagerTestCase
 
     try
     {
-      certManager.generateSelfSignedCertificate(keyType, "test-cert", "CN=Test,o=test",
+      certManager.generateSelfSignedCertificate(keyType, "test-cert", "CN=Test,o=test", null,
                                                 0);
       fail("Expected an illegal argument exception due to an invalid validity");
     } catch (IllegalArgumentException iae) {}
@@ -812,9 +815,116 @@ public class CertificateManagerTestCase
 
     CertificateManager certManager =
          new CertificateManager(path.getAbsolutePath(), "JKS", "password");
-    certManager.generateSelfSignedCertificate(keyType, "test-cert", "CN=Test,o=test",
+    certManager.generateSelfSignedCertificate(keyType, "test-cert", "CN=Test,o=test", null,
                                               365);
     assertTrue(certManager.aliasInUse("test-cert"));
+    path.delete();
+  }
+
+
+
+  /**
+   * Tests that {@code getSubjectDN} shortens a host name exceeding the RFC 5280 ub-common-name
+   * bound, which Bouncy Castle refuses to encode, and leaves shorter ones untouched.
+   */
+  @Test(dataProvider="subjectDNs")
+  public void testGetSubjectDN(String hostName, String organization, String expected)
+  {
+    assertEquals(CertificateManager.getSubjectDN(hostName, organization), expected);
+  }
+
+  @DataProvider
+  public Object[][] subjectDNs()
+  {
+    final String maxLength = "a".repeat(64);
+    return new Object[][] {
+      // host name, organization, expected subject DN
+      { "ds.example.com", "OpenDJ RSA Certificate", "cn=ds.example.com,O=OpenDJ RSA Certificate" },
+      { "127.0.0.1", "OpenDJ RSA Certificate", "cn=127.0.0.1,O=OpenDJ RSA Certificate" },
+      { maxLength, "OpenDJ RSA Certificate", "cn=" + maxLength + ",O=OpenDJ RSA Certificate" },
+      { maxLength + "a", "OpenDJ RSA Certificate", "cn=" + maxLength + ",O=OpenDJ RSA Certificate" },
+      { "runnervmejwal.s45qwjd1e1xuhpuiv1334zs2ob.bx.internal.cloudapp.net", "OpenDJ RSA Certificate",
+        "cn=runnervmejwal.s45qwjd1e1xuhpuiv1334zs2ob.bx.internal.cloudapp.ne,O=OpenDJ RSA Certificate" },
+      // both values are escaped, so that DN syntax in a host name cannot alter the subject
+      { "weird,name", "OpenDJ RSA Certificate", "cn=weird\\,name,O=OpenDJ RSA Certificate" },
+    };
+  }
+
+
+
+  /**
+   * Tests that {@code generateSelfSignedCertificate} adds the provided host name as a non-critical
+   * subjectAltName, using the general name type matching the kind of host name.
+   *
+   * @throws  Exception  If a problem occurs.
+   */
+  @Test(dataProvider="subjectAltNames")
+  public void testGenerateSelfSignedCertificateSubjectAltName(String hostName, int generalNameType)
+         throws Exception
+  {
+    if (! CERT_MANAGER_AVAILABLE)
+    {
+      return;
+    }
+
+    File path = File.createTempFile("testGenerateSelfSignedCertificateSAN", ".keystore");
+    path.deleteOnExit();
+    path.delete();
+
+    CertificateManager certManager =
+         new CertificateManager(path.getAbsolutePath(), "JKS", "password");
+    certManager.generateSelfSignedCertificate(KeyType.RSA, "test-cert", "CN=Test,o=test", hostName, 365);
+
+    X509Certificate cert = (X509Certificate) certManager.getCertificate("test-cert");
+    Collection<List<?>> subjectAltNames = cert.getSubjectAlternativeNames();
+    assertNotNull(subjectAltNames, "no subjectAltName extension was added");
+    assertEquals(subjectAltNames.size(), 1);
+    List<?> subjectAltName = subjectAltNames.iterator().next();
+    assertEquals(subjectAltName.get(0), generalNameType);
+    assertEquals(subjectAltName.get(1), hostName);
+    // Non-critical, so that clients unable to match it can still fall back to the commonName.
+    assertFalse(cert.getCriticalExtensionOIDs().contains("2.5.29.17"));
+    path.delete();
+  }
+
+  @DataProvider
+  public Object[][] subjectAltNames()
+  {
+    return new Object[][] {
+      // host name, expected GeneralName type (2 = dNSName, 7 = iPAddress)
+      { "ds.example.com", 2 },
+      { "runnervmejwal.s45qwjd1e1xuhpuiv1334zs2ob.bx.internal.cloudapp.net", 2 },
+      { "10.0.0.5", 7 },
+    };
+  }
+
+
+
+  /**
+   * Tests that {@code generateSelfSignedCertificate} adds no subjectAltName extension when no host
+   * name is provided.
+   *
+   * @throws  Exception  If a problem occurs.
+   */
+  @Test
+  public void testGenerateSelfSignedCertificateWithoutSubjectAltName()
+         throws Exception
+  {
+    if (! CERT_MANAGER_AVAILABLE)
+    {
+      return;
+    }
+
+    File path = File.createTempFile("testGenerateSelfSignedCertificateNoSAN", ".keystore");
+    path.deleteOnExit();
+    path.delete();
+
+    CertificateManager certManager =
+         new CertificateManager(path.getAbsolutePath(), "JKS", "password");
+    certManager.generateSelfSignedCertificate(KeyType.RSA, "test-cert", "CN=Test,o=test", null, 365);
+
+    X509Certificate cert = (X509Certificate) certManager.getCertificate("test-cert");
+    assertNull(cert.getSubjectAlternativeNames());
     path.delete();
   }
 
@@ -842,7 +952,7 @@ public class CertificateManagerTestCase
 
     CertificateManager certManager =
          new CertificateManager(path.getAbsolutePath(), "PKCS12", "password");
-    certManager.generateSelfSignedCertificate(keyType, "test-cert", "CN=Test,o=test",
+    certManager.generateSelfSignedCertificate(keyType, "test-cert", "CN=Test,o=test", null,
                                               365);
     assertTrue(certManager.aliasInUse("test-cert"));
     path.delete();

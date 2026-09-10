@@ -30,7 +30,6 @@ import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.PrintWriter;
-import java.net.UnknownHostException;
 import java.security.Key;
 import java.security.KeyStore;
 import java.security.KeyStoreException;
@@ -43,7 +42,6 @@ import java.util.Random;
 import java.util.Set;
 import java.util.SortedSet;
 
-import javax.naming.ldap.Rdn;
 import javax.net.ssl.KeyManager;
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.TrustManager;
@@ -930,10 +928,12 @@ public class TrustStoreBackend extends LocalBackend<TrustStoreBackendCfg>
         try
         {
           final KeyType keyType = KeyType.getTypeOrDefault(certAlias);
+          final String hostName = SetupUtils.getHostNameForCertificate(DirectoryServer.getServerRoot());
           certificateManager.generateSelfSignedCertificate(
              keyType,
              certAlias,
-             getADSCertificateSubjectDN(keyType),
+             getADSCertificateSubjectDN(keyType, hostName),
+             hostName,
              getADSCertificateValidity());
         }
         catch (Exception e)
@@ -1059,14 +1059,14 @@ public class TrustStoreBackend extends LocalBackend<TrustStoreBackendCfg>
 
   /**
    * Returns the Subject DN to be used to generate the ADS certificate.
+   *
+   * @param keyType The key type the certificate is generated for.
+   * @param hostName The host name of this server.
    * @return The Subject DN to be used to generate the ADS certificate.
-   * @throws java.net.UnknownHostException If the server host name could not be
-   *                                       determined.
    */
-  private static String getADSCertificateSubjectDN(KeyType keyType) throws UnknownHostException
+  private static String getADSCertificateSubjectDN(KeyType keyType, String hostName)
   {
-    final String hostName = SetupUtils.getHostNameForCertificate(DirectoryServer.getServerRoot());
-    return "cn=" + Rdn.escapeValue(hostName) + ",O=OpenDJ " + keyType + " Certificate";
+    return CertificateManager.getSubjectDN(hostName, "OpenDJ " + keyType + " Certificate");
   }
 
   /**
@@ -1176,8 +1176,9 @@ public class TrustStoreBackend extends LocalBackend<TrustStoreBackendCfg>
     try
     {
       final KeyType keyType = KeyType.getTypeOrDefault(certAlias);
-      certificateManager.generateSelfSignedCertificate(keyType, certAlias, getADSCertificateSubjectDN(keyType),
-          getADSCertificateValidity());
+      final String hostName = SetupUtils.getHostNameForCertificate(DirectoryServer.getServerRoot());
+      certificateManager.generateSelfSignedCertificate(keyType, certAlias,
+          getADSCertificateSubjectDN(keyType, hostName), hostName, getADSCertificateValidity());
     }
     catch (Exception e)
     {

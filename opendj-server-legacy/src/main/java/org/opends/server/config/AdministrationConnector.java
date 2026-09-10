@@ -26,7 +26,6 @@ import java.util.List;
 import java.util.SortedSet;
 import java.util.TreeSet;
 
-import javax.naming.ldap.Rdn;
 
 import org.forgerock.i18n.LocalizableMessage;
 import org.forgerock.i18n.slf4j.LocalizedLogger;
@@ -515,9 +514,9 @@ public final class AdministrationConnector implements
       for (String certAlias : certAliases)
       {
         final KeyType keyType = KeyType.getTypeOrDefault(certAlias);
-        final String subjectDN =
-            "cn=" + Rdn.escapeValue(hostName) + ",O=" + FRIENDLY_NAME + " " + keyType + " Self-Signed Certificate";
-        certManager.generateSelfSignedCertificate(keyType, certAlias, subjectDN, ADMIN_CERT_VALIDITY);
+        final String subjectDN = CertificateManager.getSubjectDN(hostName,
+            FRIENDLY_NAME + " " + keyType + " Self-Signed Certificate");
+        certManager.generateSelfSignedCertificate(keyType, certAlias, subjectDN, hostName, ADMIN_CERT_VALIDITY);
 
         SetupUtils.exportCertificate(certManager, certAlias, tempCertPath);
 

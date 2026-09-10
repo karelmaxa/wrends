@@ -52,7 +52,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-import javax.naming.ldap.Rdn;
 import javax.swing.JPanel;
 
 import org.forgerock.i18n.LocalizableMessage;
@@ -1339,7 +1338,7 @@ public class Installer extends GuiApplication
         {
           final KeyType keyType = KeyType.getTypeOrDefault(alias);
           certManager.generateSelfSignedCertificate(keyType, alias, getSelfSignedCertificateSubjectDN(keyType),
-              getSelfSignedCertificateValidity());
+              getUserData().getHostName(), getSelfSignedCertificateValidity());
           SetupUtils.exportCertificate(certManager, alias, getTemporaryCertificatePath());
           configureTrustStore(CertificateManager.KEY_STORE_TYPE_JKS, alias, pwd);
         }
@@ -4028,7 +4027,8 @@ public class Installer extends GuiApplication
    */
   private String getSelfSignedCertificateSubjectDN(KeyType keyType)
   {
-    return "cn=" + Rdn.escapeValue(getUserData().getHostName()) + ",O=OpenDJ " + keyType + " Self-Signed Certificate";
+    return CertificateManager.getSubjectDN(getUserData().getHostName(),
+        "OpenDJ " + keyType + " Self-Signed Certificate");
   }
 
   /**

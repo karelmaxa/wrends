@@ -23,6 +23,7 @@ import java.security.KeyStoreException;
 import java.security.cert.Certificate;
 import java.util.ArrayList;
 import java.util.Enumeration;
+import javax.naming.ldap.Rdn;
 import org.forgerock.i18n.LocalizableMessage;
 import static org.opends.messages.UtilityMessages.*;
 import org.opends.server.util.Platform.KeyType;
@@ -42,6 +43,9 @@ import org.opends.server.util.Platform.KeyType;
      mayExtend=false,
      mayInvoke=true)
 public final class CertificateManager {
+
+  /** Maximum length of a commonName attribute value, as defined by RFC 5280 (ub-common-name). */
+  private static final int UB_COMMON_NAME = 64;
 
   /**
    * The key store type value that should be used for the "JKS" key store.
@@ -263,6 +267,28 @@ public final class CertificateManager {
 
 
   /**
+   * Returns the subject DN to use for a self-signed certificate generated for the provided host
+   * name.
+   * <p>
+   * RFC 5280 limits commonName to {@code ub-common-name} (64) characters, and Bouncy Castle refuses
+   * to parse a DN carrying a longer value since version 1.85. A host name which does not fit is
+   * truncated, so that a server whose fully qualified name is longer than that can still generate
+   * its certificates; the complete host name belongs in the subjectAltName extension, which is
+   * where RFC 6125 expects clients to look for it.
+   *
+   * @param  hostName      The host name the certificate is generated for.
+   * @param  organization  The value of the organization attribute of the subject DN.
+   * @return  The subject DN to use for the certificate.
+   */
+  public static String getSubjectDN(String hostName, String organization) {
+    final String commonName = hostName.length() <= UB_COMMON_NAME
+        ? hostName
+        : hostName.substring(0, UB_COMMON_NAME);
+    return "cn=" + Rdn.escapeValue(commonName) + ",O=" + Rdn.escapeValue(organization);
+  }
+
+
+  /**
    * Generates a self-signed certificate using the provided information.
    *
    * @param  keyType    Specifies the key size, key and signature algorithms.
@@ -271,6 +297,9 @@ public final class CertificateManager {
    *                    be "server-cert".  It must not be {@code null} or empty.
    * @param  subjectDN  The subject DN to use for the certificate.  It must not
    *                    be {@code null} or empty.
+   * @param  hostName   The host name to add to the subjectAltName extension, either a DNS name or an
+   *                    IP address literal. May be {@code null} to generate a certificate without
+   *                    that extension.
    * @param  validity   The length of time in days that the certificate should
    *                    be valid, starting from the time the certificate is
    *                    generated.  It must be a positive integer value.
@@ -281,8 +310,7 @@ public final class CertificateManager {
    *                                 in the keystore.
    */
   public void generateSelfSignedCertificate(KeyType keyType, String alias, String subjectDN,
-                                            int validity)
-  throws KeyStoreException, IllegalArgumentException {
+          String hostName, int validity) throws KeyStoreException, IllegalArgumentException {
     ensureValid(alias, CERT_ALIAS_MSG);
     ensureValid(subjectDN, SUBJECT_DN_MSG);
     if (validity <= 0) {
@@ -295,7 +323,7 @@ public final class CertificateManager {
     }
     keyStore = null;
     Platform.generateSelfSignedCertificate(getKeyStore(), keyStoreType,
-        keyStorePath, keyType, alias, password, subjectDN, validity);
+        keyStorePath, keyType, alias, password, subjectDN, hostName, validity);
   }
 
 
